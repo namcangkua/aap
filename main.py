@@ -71,9 +71,14 @@ def handle_status(chat_id):
 def handle_balance(chat_id):
     try:
         b = get_usdc_balance()
-        tg(f"💰 <b>Balance</b>\n${b:.4f} USDC\nMax/trade: ${MAX_POSITION_USDC}\nStop: -${MAX_DAILY_LOSS_USDC}", chat_id)
+        if b <= 0:
+            tg(f"⚠️ <b>Balance Zero</b>\n💰 ${b:.4f} USDC\n\nCheck POLYMARKET_FUNDER address or deposit funds.", chat_id)
+        else:
+            tg(f"💰 <b>Balance</b>\n${b:.4f} USDC\nMax/trade: ${MAX_POSITION_USDC}\nStop loss: -${MAX_DAILY_LOSS_USDC}", chat_id)
     except Exception as e:
-        tg(f"❌ {str(e)[:100]}", chat_id)
+        error_msg = str(e)[:150]
+        print(f"[HANDLE_BALANCE] Error: {error_msg}")
+        tg(f"❌ <b>Balance Check Failed</b>\n{error_msg}\n\nCheck API keys & Polymarket connection.", chat_id)
 
 
 def handle_pause(chat_id):
@@ -168,10 +173,12 @@ def get_usdc_balance() -> float:
         raw = get_clob_client().get_balance()
         # try dividing by 1e6 first (wei), if result < 0.001 assume already in USDC
         val = float(raw)
-        return val / 1e6 if val > 100 else val
+        result = val / 1e6 if val > 100 else val
+        print(f"[BALANCE] Retrieved: {result} USDC (raw: {raw})")
+        return result
     except Exception as e:
-        print(f"[BALANCE] {e}")
-        return 0.0
+        print(f"[BALANCE ERROR] Failed to get balance: {e}")
+        raise  # Re-raise so caller knows there's a real error
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -731,8 +738,13 @@ def run_agent_cycle(client, cycle):
         for tc in msg.tool_calls:
             name = tc.function.name
             try:
-                args = json.loads(tc.function.arguments)
-            except Exception:
+                # Handle None arguments gracefully
+                if tc.function.arguments is None:
+                    args = {}
+                else:
+                    args = json.loads(tc.function.arguments)
+            except Exception as e:
+                print(f"[TOOL] Failed to parse args for {name}: {e}")
                 args = {}
             func   = TOOL_MAP.get(name)
             result = func(**args) if func else json.dumps({"status": "error", "message": f"unknown:{name}"})
