@@ -162,7 +162,7 @@ def get_clob_client():
             key=POLYMARKET_PK,
             chain_id=POLYGON,
             signature_type=1,    # Magic Link / email login
-            funder=POLYMARKET_FUNDER,
+            funder=POLYMARKET_FUNDER if POLYMARKET_FUNDER else None,
         )
         _clob_client.set_api_creds(_clob_client.create_or_derive_api_creds())
     return _clob_client
@@ -170,15 +170,28 @@ def get_clob_client():
 
 def get_usdc_balance() -> float:
     try:
-        raw = get_clob_client().get_balance()
-        # try dividing by 1e6 first (wei), if result < 0.001 assume already in USDC
+        # Use correct method: get_balance_native() returns balance in wei
+        raw = get_clob_client().get_balance_native()
+        # Convert from wei (1e6 per USDC on Polygon)
         val = float(raw)
         result = val / 1e6 if val > 100 else val
         print(f"[BALANCE] Retrieved: {result} USDC (raw: {raw})")
         return result
+    except AttributeError:
+        # Fallback: if get_balance_native not available, try direct CLOB API call
+        try:
+            client = get_clob_client()
+            user = client.get_user()
+            usdc_balance = user.get('balances', {}).get('USDC', 0)
+            result = float(usdc_balance) / 1e6 if usdc_balance > 100 else float(usdc_balance)
+            print(f"[BALANCE] Retrieved via user API: {result} USDC")
+            return result
+        except Exception as e2:
+            print(f"[BALANCE ERROR] Fallback failed: {e2}")
+            raise
     except Exception as e:
         print(f"[BALANCE ERROR] Failed to get balance: {e}")
-        raise  # Re-raise so caller knows there's a real error
+        raise
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -257,7 +270,9 @@ def score_mispricing(market: dict) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # TOOLS
 # ══════════════════════════════════════════════════════════════════════════════
-def tool_scan_fresh_markets(limit: int = 30) -> str:
+def tool_scan_fresh_markets(limit: int = None) -> str:
+    if limit is None:
+        limit = 30
     """Scan for fresh crypto markets sorted by mispricing score."""
     try:
         r = requests.get(
@@ -438,7 +453,7 @@ def tool_snipe_entry(
         return json.dumps({"status": "error", "message": str(e)})
 
 
-def tool_check_and_exit() -> str:
+def tool_check_and_exit(**kwargs) -> str:
     """
     Check all open positions for exit conditions.
     Agent decides: hold if momentum strong, exit if target hit or reversal detected.
@@ -537,7 +552,7 @@ def tool_exit_position(token_id: str, reason: str = "") -> str:
         return json.dumps({"status": "error", "message": str(e)})
 
 
-def tool_check_positions() -> str:
+def tool_check_positions(**kwargs) -> str:
     elapsed = (datetime.now() - _start_time).total_seconds()
     tph     = (_trade_count / max(elapsed, 1)) * 3600
     return json.dumps({
@@ -566,7 +581,7 @@ def tool_check_positions() -> str:
     })
 
 
-def tool_cancel_all_orders() -> str:
+def tool_cancel_all_orders(**kwargs) -> str:
     global _positions
     try:
         get_clob_client().cancel_all()
