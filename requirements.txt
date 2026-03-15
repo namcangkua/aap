@@ -1,0 +1,5 @@
+groq==0.13.0
+py-clob-client==0.18.0
+python-dotenv==1.0.1
+numpy==1.26.4
+requests==2.31.0
